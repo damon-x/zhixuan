@@ -130,13 +130,30 @@ func Load() {
 	}
 	log.Println("已加载 config.json")
 
-	// Apply to package-level vars
+	// Apply to package-level vars.
+	// 敏感信息（API key）必须由 config.json 提供，不兜底；
+	// 非敏感的结构性参数（端口、路径、阈值等）在 config.json 未设置时代码兜底，便于上手。
 	ServerPort = cfg.ServerPort
+	if ServerPort == "" {
+		ServerPort = ":8080"
+	}
 	DataDir = cfg.DataDir
+	if DataDir == "" {
+		DataDir = "biz_data"
+	}
 	DBType = cfg.DB.Type
+	if DBType == "" {
+		DBType = "sqlite"
+	}
 	DBPath = cfg.DB.Path
+	if DBPath == "" {
+		DBPath = "biz_data/zhixuan.db"
+	}
 	DBDSN = cfg.DB.DSN
 	TokenMaxAge = cfg.TokenMaxAge
+	if TokenMaxAge <= 0 {
+		TokenMaxAge = 86400 * 365 * 10
+	}
 
 	LLMAPIKey = cfg.LLM.APIKey
 	LLMBaseURL = cfg.LLM.BaseURL
@@ -157,6 +174,9 @@ func Load() {
 	}
 	EmbeddingModel = cfg.Embedding.Model
 	EmbeddingDimensions = cfg.Embedding.Dimensions
+	if EmbeddingDimensions <= 0 {
+		EmbeddingDimensions = 1024
+	}
 
 	RerankAPIKey = cfg.Rerank.APIKey
 	if RerankAPIKey == "" {
@@ -166,7 +186,13 @@ func Load() {
 	RerankModel = cfg.Rerank.Model
 
 	ChunkWindowSize = cfg.Chunk.WindowSize
+	if ChunkWindowSize <= 0 {
+		ChunkWindowSize = 500
+	}
 	ChunkOverlap = cfg.Chunk.Overlap
+	if ChunkOverlap <= 0 {
+		ChunkOverlap = 50
+	}
 
 	BochaAPIKey = cfg.Bocha.APIKey
 	BochaBaseURL = cfg.Bocha.BaseURL
@@ -184,10 +210,22 @@ func Load() {
 	}
 
 	MemoryRecallThreshold = cfg.Memory.RecallThreshold
+	if MemoryRecallThreshold <= 0 {
+		MemoryRecallThreshold = 0.5
+	}
 	MemoryBatchRounds = cfg.Memory.BatchRounds
+	if MemoryBatchRounds <= 0 {
+		MemoryBatchRounds = 3
+	}
 
 	ContextCompressThreshold = cfg.Context.CompressThreshold
+	if ContextCompressThreshold <= 0 {
+		ContextCompressThreshold = 50000
+	}
 	ContextSummaryMaxChars = cfg.Context.SummaryMaxChars
+	if ContextSummaryMaxChars <= 0 {
+		ContextSummaryMaxChars = 5000
+	}
 }
 
 // KBDir returns the knowledge bases directory path.

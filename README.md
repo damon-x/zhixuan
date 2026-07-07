@@ -105,7 +105,7 @@ CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o zhixuan-arm64
 | `memory` | 召回阈值（默认 0.5）、批处理轮数 |
 | `context` | 上下文压缩阈值、摘要最大字数 |
 
-> 配置只从 `config.json` 读取，代码里不内嵌任何默认值 —— 缺字段即为零值，请按模板补齐。
+> 配置以 `config.json` 为准：敏感信息（API key）必须由 config.json 提供，不兜底；非敏感的结构性参数（端口、路径、阈值等）未设置时代码会兜底，便于快速上手。
 
 ## 设计要点
 
