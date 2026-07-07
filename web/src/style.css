@@ -1,0 +1,12 @@
+/* 全局布局：固定视口，禁止整页滚动，由各视图内部容器管理滚动 */
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  overflow: hidden;
+}

@@ -1,0 +1,48 @@
+{
+  "server_port": ":8080",
+  "data_dir": "biz_data",
+  "token_max_age": 315360000,
+  "db": {
+    "type": "sqlite",
+    "path": "biz_data/zhixuan.db",
+    "dsn": ""
+  },
+  "llm": {
+    "api_key": "",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "deepseek-v3.2-exp",
+    "models": []
+  },
+  "embedding": {
+    "api_key": "",
+    "base_url": "",
+    "model": "text-embedding-v4",
+    "dimensions": 1024
+  },
+  "rerank": {
+    "api_key": "",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-api/v1",
+    "model": "qwen3-rerank"
+  },
+  "chunk": {
+    "window_size": 500,
+    "overlap": 50
+  },
+  "bocha": {
+    "api_key": "",
+    "base_url": "https://api.bochaai.com/v1"
+  },
+  "vision": {
+    "api_key": "",
+    "base_url": "",
+    "models": []
+  },
+  "memory": {
+    "recall_threshold": 0.5,
+    "batch_rounds": 3
+  },
+  "context": {
+    "compress_threshold": 50000,
+    "summary_max_chars": 5000
+  }
+}
