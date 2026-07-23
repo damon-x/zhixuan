@@ -300,7 +300,7 @@ func UploadDoc(c *gin.Context) {
 				fmt.Printf("[knowledge] index error: %v\n", err)
 			}
 		}()
-	case ".jpg", ".jpeg", ".png", ".gif":
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 		go func() {
 			imgData, err := os.ReadFile(dst)
 			if err != nil {

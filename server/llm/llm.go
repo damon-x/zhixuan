@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -201,6 +202,11 @@ func ChatForToolCall(ctx context.Context, messages []Message, tools []openai.Cha
 	return result, nil
 }
 
+// ErrMaxIterations 表示 agent 达到最大迭代轮数。
+// 这不是真正的错误——中间过程（tool call + result）都是有价值的已完成工作，
+// 调用方可据此把 intermediates 落库，再让用户发「继续」接续。
+var ErrMaxIterations = errors.New("agent reached maximum iterations")
+
 // ChatWithTools implements a ReAct agent loop with tool calling capability.
 // It repeatedly calls the LLM, executing any tool calls, until the LLM returns
 // a final text response or the maximum number of iterations is reached.
@@ -219,7 +225,7 @@ func ChatWithTools(ctx context.Context, messages []Message, tools []openai.ChatC
 	// ReAct 循环里上下文只增不减，最后一次 doCompletion 的 total_tokens 即本轮峰值
 	lastTotalTokens := 0
 
-	const maxIterations = 5
+	const maxIterations = 10
 	for i := 0; i < maxIterations; i++ {
 		// Check for cancellation
 		select {
@@ -310,5 +316,5 @@ func ChatWithTools(ctx context.Context, messages []Message, tools []openai.ChatC
 		}
 	}
 
-	return "", intermediates, lastTotalTokens, fmt.Errorf("agent reached maximum iterations (%d)", maxIterations)
+	return "", intermediates, lastTotalTokens, fmt.Errorf("%w (%d)", ErrMaxIterations, maxIterations)
 }

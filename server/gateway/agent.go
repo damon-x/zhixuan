@@ -2,6 +2,7 @@ package gateway
 
 import (
 	stdctx "context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -196,6 +197,8 @@ func (a *Agent) processMessage(ctx stdctx.Context, req *ChatRequest) *ChatRespon
 			return executeSearchKB(&user, argsJSON)
 		case "web_search":
 			return executeWebSearch(&user, argsJSON)
+		case "web_fetch":
+			return executeWebFetch(&user, argsJSON)
 		case "list_knowledge_bases":
 			return executeListKB(&user, argsJSON)
 		case "list_notes":
@@ -246,6 +249,8 @@ func (a *Agent) processMessage(ctx stdctx.Context, req *ChatRequest) *ChatRespon
 			return executeExecSQL(&user, argsJSON)
 		case "load_skill":
 			return executeLoadSkill(&user, argsJSON)
+		case "run_command":
+			return executeRunCommand(&user, argsJSON)
 		case "search_memory":
 			return executeSearchMemory(user.ID, argsJSON)
 		default:
@@ -256,9 +261,9 @@ func (a *Agent) processMessage(ctx stdctx.Context, req *ChatRequest) *ChatRespon
 	// 9. Assemble tool list
 	tools := []openai.ChatCompletionToolParam{
 		saveNoteTool, getNoteContentTool, searchKBTool,
-		webSearchTool, listKBTool, listNotesTool, createTodoTool,
+		webSearchTool, webFetchTool, listKBTool, listNotesTool, createTodoTool,
 		qqNotifyTool, wechatNotifyTool, describeImageTool,
-		readFileTool, writeFileTool, editFileTool, listFilesTool,
+		readFileTool, writeFileTool, editFileTool, listFilesTool, runCommandTool,
 		updateNoteTool, deleteNoteTool,
 		listTodosTool, updateTodoTool, deleteTodoTool,
 		listPlansTool, getPlanTool,
@@ -272,6 +277,21 @@ func (a *Agent) processMessage(ctx stdctx.Context, req *ChatRequest) *ChatRespon
 	messages = applyTimestamps(messages)
 	reply, intermediates, totalTokens, err := llm.ChatWithTools(ctx, messages, tools, executeTool)
 	if err != nil {
+		// 达到最大轮数：不是异常，是任务太大。中间过程（tool call + result）都已闭合，
+		// 正常落库不浪费工作，接口返回系统报错引导用户发「继续」接续。
+		// 报错本身不进历史对话和上下文，下轮「继续」直接从快照里的 tool result 后续接。
+		if errors.Is(err, llm.ErrMaxIterations) {
+			replyAt := time.Now()
+			for i := range intermediates {
+				if intermediates[i].CreatedAt.IsZero() {
+					intermediates[i].CreatedAt = replyAt
+				}
+			}
+			context.AppendHistory(sessionID, intermediates)
+			context.AppendOrCompress(ctx, sessionID, intermediates, totalTokens)
+			log.Printf("[agent] 达到最大轮数，已落库 %d 条中间消息，等待用户「继续」", len(intermediates))
+			return &ChatResponse{Error: fmt.Errorf("任务步骤较多，已处理部分工作，请回复「继续」继续执行")}
+		}
 		log.Printf("[agent] LLM 调用失败: %v", err)
 		return &ChatResponse{Error: fmt.Errorf("AI 回复失败: %s", err.Error())}
 	}

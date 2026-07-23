@@ -19,7 +19,7 @@ const tokenTTL = 24 * time.Hour
 func Register(c *gin.Context) {
 	var req struct {
 		Username string `json:"username" binding:"required"`
-		Password string `json:"password" binding:"required,min:6"`
+		Password string `json:"password" binding:"required,min=6"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusOK, gin.H{"code": 1, "msg": "参数错误"})

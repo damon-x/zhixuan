@@ -1,11 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	stdctx "context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -147,6 +149,24 @@ var webSearchTool = openai.ChatCompletionToolParam{
 				},
 			},
 			"required": []string{"query"},
+		},
+	},
+}
+
+// webFetchTool allows the LLM to fetch a web page and read its text content.
+var webFetchTool = openai.ChatCompletionToolParam{
+	Function: openai.FunctionDefinitionParam{
+		Name:        "web_fetch",
+		Description: openai.String("抓取指定 URL 的网页正文内容（纯文本）。当需要阅读某个网页的具体内容，或想深入了解 web_search 返回的某个链接时，使用此工具。返回正文前 5000 字。"),
+		Parameters: openai.FunctionParameters{
+			"type": "object",
+			"properties": map[string]any{
+				"url": map[string]any{
+					"type":        "string",
+					"description": "要抓取的网页地址（以 http:// 或 https:// 开头）",
+				},
+			},
+			"required": []string{"url"},
 		},
 	},
 }
@@ -468,6 +488,28 @@ func executeWebSearch(user *model.User, argsJSON string) (string, error) {
 	return string(resultJSON), nil
 }
 
+func executeWebFetch(user *model.User, argsJSON string) (string, error) {
+	var args struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	args.URL = strings.TrimSpace(args.URL)
+	if args.URL == "" {
+		return "", fmt.Errorf("url 不能为空")
+	}
+
+	log.Printf("[tool] web_fetch 调用: url=%q", args.URL)
+	text, err := fetchWebPage(args.URL)
+	if err != nil {
+		log.Printf("[tool] web_fetch 失败: %v", err)
+		return "", fmt.Errorf("抓取网页失败: %w", err)
+	}
+	log.Printf("[tool] web_fetch 返回: %d 字", len([]rune(text)))
+	return text, nil
+}
+
 func executeListKB(user *model.User, argsJSON string) (string, error) {
 	log.Printf("[tool] list_knowledge_bases 调用")
 
@@ -713,6 +755,28 @@ var listFilesTool = openai.ChatCompletionToolParam{
 	},
 }
 
+// runCommandTool allows the LLM to run a shell command in the user's workspace.
+var runCommandTool = openai.ChatCompletionToolParam{
+	Function: openai.FunctionDefinitionParam{
+		Name:        "run_command",
+		Description: openai.String("在用户工作区目录下执行 shell 命令并返回输出。命令以 sh -c 执行，支持管道、重定向、环境变量、&& 等语法。需要运行外部命令、查看系统状态、处理文件等场景使用。交互式命令（如 vim/top）因无 stdin 输入会立即退出。返回 JSON：exit_code/duration_ms/stdout/stderr/timed_out。"),
+		Parameters: openai.FunctionParameters{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{
+					"type":        "string",
+					"description": "要执行的 shell 命令",
+				},
+				"timeout": map[string]any{
+					"type":        "integer",
+					"description": "超时秒数（默认 120，最大 300）",
+				},
+			},
+			"required": []string{"command"},
+		},
+	},
+}
+
 // workspaceFilePath validates and returns the absolute path for a workspace file.
 func workspaceFilePath(userID uint, relPath string) (string, error) {
 	cleanRel := filepath.Clean(relPath)
@@ -923,6 +987,86 @@ func executeListFiles(user *model.User, argsJSON string) (string, error) {
 
 	resultJSON, _ := json.Marshal(items)
 	return string(resultJSON), nil
+}
+
+func executeRunCommand(user *model.User, argsJSON string) (string, error) {
+	var args struct {
+		Command string `json:"command"`
+		Timeout int    `json:"timeout"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid arguments: %w", err)
+	}
+	args.Command = strings.TrimSpace(args.Command)
+	if args.Command == "" {
+		return "", fmt.Errorf("command 不能为空")
+	}
+	timeout := args.Timeout
+	if timeout <= 0 {
+		timeout = 120
+	}
+	if timeout > 300 {
+		timeout = 300
+	}
+
+	ctx, cancel := stdctx.WithTimeout(stdctx.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	// cwd 锁定用户工作区根；workspaceFilePath 自带 .. 逃逸防御
+	cwd, err := workspaceFilePath(user.ID, ".")
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(cwd, 0755); err != nil {
+		return "", fmt.Errorf("创建工作区失败: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", args.Command)
+	cmd.Dir = cwd
+	// 不设置 cmd.Stdin —— Go 默认接 /dev/null，vim/top 等交互命令会立即因无 tty 退出
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	start := time.Now()
+	runErr := cmd.Run()
+	durationMs := time.Since(start).Milliseconds()
+
+	type result struct {
+		ExitCode   int    `json:"exit_code"`
+		DurationMs int64  `json:"duration_ms"`
+		Stdout     string `json:"stdout"`
+		Stderr     string `json:"stderr"`
+		TimedOut   bool   `json:"timed_out"`
+	}
+	r := result{
+		DurationMs: durationMs,
+		Stdout:     stdout.String(),
+		Stderr:     stderr.String(),
+	}
+
+	if ctx.Err() == stdctx.DeadlineExceeded {
+		r.TimedOut = true
+		r.ExitCode = -1
+	} else if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			r.ExitCode = exitErr.ExitCode()
+		} else {
+			return "", fmt.Errorf("执行失败: %w", runErr)
+		}
+	}
+
+	const maxOutput = 20000
+	if len(r.Stdout) > maxOutput {
+		r.Stdout = r.Stdout[:maxOutput] + "\n...(stdout 截断)"
+	}
+	if len(r.Stderr) > maxOutput {
+		r.Stderr = r.Stderr[:maxOutput] + "\n...(stderr 截断)"
+	}
+
+	b, _ := json.Marshal(r)
+	return string(b), nil
 }
 
 func executeWeChatNotify(user *model.User, argsJSON string) (string, error) {
